@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.rawgit.com/mrdoob/three.js/r128/build/three.min.js"></script>
+    <script src="https://cdn.rawgit.com/mrdoob/three.js/r128/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            background: hsl(100, 0%, 10%);
+        }
+
+        #web-you-3d-container {
+            position: absolute;
+            background: white;
+            height: 70%;
+            width: 100%;
+        }
+
+        #toggleButton {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 8px 16px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+<div id="web-you-3d-container" data-width="100" data-height="100" data-url="D3E0BB70-8391-46D7-BF3C-763A54BCF65D-600x600.jpg"></div>
+<button id="toggleButton">Toggle View</button>
+
+<script>
+    const divId = "web-you-3d-container";
+    let canvas = document.getElementById(divId);
+    const paintingPath = canvas.dataset.url;
+    const paintingW = parseFloat(canvas.dataset.width) / 100;
+    const paintingH = parseFloat(canvas.dataset.height) / 100;
+
+    const scene = new THREE.Scene();
+    const clock = new THREE.Clock();
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+
+    let controls, camera, cameraOnSpline, splinePoints, splineTime = 0, closedSpline;
+    let firstCameraActive = true, distance, boundingBox, tubeGeometry,binormal,normal;
+
+    function main() {
+        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio * 2);
+        renderer.antialias = true;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.gammaOutput = true;
+        renderer.gammaFactor = 2;
+        renderer.outputEncoding = THREE.LinearEncoding;
+        renderer.setClearColor(0xffffff, 0);
+        canvas.appendChild(renderer.domElement);
+
+        camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.001, 5000);
+
+        const texture = new THREE.TextureLoader().load(paintingPath);
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        const geometry = new THREE.BoxGeometry(paintingW, paintingH, 0.01);
+        const cube = new THREE.Mesh(geometry, material);
+        scene.add(cube);
+
+        const blackMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+        const frame_geometry = new THREE.BoxGeometry(paintingW * 2, paintingH * 2, 0.01);
+        const frame_cube = new THREE.Mesh(frame_geometry, blackMaterial);
+        frame_cube.position.set(0, 0, -3)
+        scene.add(frame_cube);
+
+        boundingBox = new THREE.Box3().setFromObject(cube);
+        const objectSize = boundingBox.getSize(new THREE.Vector3()).length();
+        const fov = camera.fov * (Math.PI / 180);
+        distance = objectSize / (2 * Math.tan(fov / 2));
+
+        camera.position.copy(boundingBox.getCenter(new THREE.Vector3()));
+        camera.position.z += distance * 0.8;
+        camera.lookAt(boundingBox.getCenter(new THREE.Vector3()));
+        const halfCubeWidth = paintingW * 0.5;
+        const halfCubeHeight = paintingH * 0.5;
+        const offset = 0.1;
+
+        const points = [
+        new THREE.Vector3(-halfCubeWidth - offset, -halfCubeHeight - offset, 0),
+        new THREE.Vector3(-halfCubeWidth - offset, halfCubeHeight + offset, 0),
+        new THREE.Vector3(halfCubeWidth + offset, halfCubeHeight + offset, 0),
+            new THREE.Vector3(halfCubeWidth + offset, -halfCubeHeight - offset, 0),
+           
+          
+           
+        ];
+
+         closedSpline = new THREE.CatmullRomCurve3(points);
+        closedSpline.closed = true;
+        tubeGeometry = new THREE.TubeBufferGeometry( closedSpline, 4,0, 1, true );
+            addGeometry( tubeGeometry );
+             binormal = new THREE.Vector3();
+            normal = new THREE.Vector3();
+
+        setupSecondCamera();
+
+        
+        light = new THREE.HemisphereLight('#FFFFFF', '#757575', 0.5);
+        scene.add(light);
+
+        light = new THREE.SpotLight(0xc3c3c3, 0.5);
+        light.position.set(-4, 4, -1);
+        light.castShadow = true;
+        light.shadow.bias = -0.001;
+        light.shadow.mapSize.width = 1024 * 4;
+        light.shadow.mapSize.height = 1024 * 4;
+        scene.add(light);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        animate();
+
+        const toggleButton = document.getElementById('toggleButton');
+        toggleButton.addEventListener('click', () => {
+            firstCameraActive = !firstCameraActive;
+            camera.visible = firstCameraActive;
+            cameraOnSpline.visible = !firstCameraActive;
+
+        });
+
+        window.addEventListener('resize', onWindowResize, false);
+    }
+
+    function setupSecondCamera() {
+        cameraOnSpline = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.001, 5000);
+
+        cameraHelper = new THREE.CameraHelper( cameraOnSpline );
+		scene.add( cameraHelper );
+
+    }
+
+    function updateSecondCameraPosition() {
+ 	// animate camera along spline
+
+			var time = Date.now();
+			var looptime = 20 * 1000;
+			var t = ( time % looptime ) / looptime;
+          
+
+			var pos = tubeGeometry.parameters.path.getPointAt( t );
+			
+
+			// interpolation
+
+			var segments = tubeGeometry.tangents.length;
+			var pickt = t * segments;
+			var pick = Math.floor( pickt );
+			var pickNext = ( pick + 1 ) % segments;
+
+			binormal.subVectors( tubeGeometry.binormals[ pickNext ], tubeGeometry.binormals[ pick ] );
+			binormal.multiplyScalar( pickt - pick ).add( tubeGeometry.binormals[ pick ] );
+
+			var dir = tubeGeometry.parameters.path.getTangentAt( t );
+			var offset = 0;
+
+			normal.copy( binormal ).cross( dir );
+
+			// we move on a offset on its binormal
+
+			pos.add( normal.clone().multiplyScalar( offset ) );
+
+			cameraOnSpline.position.copy( pos );
+	
+			// using arclength for stablization in look ahead
+
+            var lookAt = tubeGeometry.parameters.path.getPointAt( ( t + 30 / tubeGeometry.parameters.path.getLength() ) % 1 );
+
+// flip the lookAt direction to make the camera face forward
+
+            var forwardDirection = new THREE.Vector3().subVectors(cameraOnSpline.position, lookAt).normalize();
+            lookAt.copy(cameraOnSpline.position).add(forwardDirection);
+
+
+      
+			cameraOnSpline.matrix.lookAt( cameraOnSpline.position, lookAt, normal );
+			cameraOnSpline.rotation.setFromRotationMatrix( cameraOnSpline.matrix, cameraOnSpline.rotation.order );
+
+
+		
+
+    }
+    function addGeometry( geometry ) {
+        var material = new THREE.MeshLambertMaterial( { color: 0xff00ff } );
+
+var wireframeMaterial = new THREE.MeshBasicMaterial( { color: 0x000000, opacity: 0.3, wireframe: true, transparent: true } );
+mesh = new THREE.Mesh( geometry, material );
+var wireframe = new THREE.Mesh( geometry, wireframeMaterial );
+mesh.add( wireframe );
+
+scene.add( mesh );
+
+}
+    function animate() {
+        if (firstCameraActive) {
+            controls.update();
+        } else {
+           
+           
+        }
+       
+        updateSecondCameraPosition();
+        renderer.render(scene, firstCameraActive ? camera : cameraOnSpline);
+
+        requestAnimationFrame(animate);
+    }
+
+    function onWindowResize() {
+        camera.aspect = canvas.clientWidth / canvas.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    }
+
+    main();
+</script>
+</body>
+</html>
